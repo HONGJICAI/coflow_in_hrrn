@@ -6,11 +6,13 @@ class CSlaveClient :public CTCPClient{
 public:
     CSlaveClient();
     virtual ~CSlaveClient();
-    int id;
+    uint32_t id;
 protected:
     BEGIN_UV_BIND
         UV_BIND(CLoginRspMsg::MSG_ID, CLoginRspMsg)
+        UV_BIND(CKillSlaveMsg::MSG_ID, CKillSlaveMsg)
     END_UV_BIND(CTCPClient)
 
     int OnUvMessage(const CLoginRspMsg &msg, TcpClientCtx *pClient);
+    int OnUvMessage(const CKillSlaveMsg &msg, TcpClientCtx *pClient);
 };

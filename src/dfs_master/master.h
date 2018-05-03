@@ -9,8 +9,13 @@
 struct Request {
     TcpClientCtx *client;
     uint64_t requestTime;
-    int flowSize;
-    int flowId;
+    uint32_t flowSize;
+    uint32_t flowId;
+};
+struct Slave {
+    uint32_t ip;
+    uint16_t port;
+    TcpClientCtx *socket;
 };
 class CMasterServer :
     public CTCPServer
@@ -18,16 +23,23 @@ class CMasterServer :
 public:
     CMasterServer();
     virtual ~CMasterServer();
-    void LoadConfig();
     bool Start();
+    void startCoflowTest(bool hrrn);
+    void killSlave();
+    void killClient();
+    void endCoflowTest();
+    void analyseCoflow();
 
     vector<list<Request>>m_queueRequest;
-    vector<pair<uint32_t, uint16_t>>m_vectorLoginSlave;
+    vector<Slave>m_vectorLoginSlave;
+    vector<TcpClientCtx*>m_vectorLoginUser;
     unordered_set<int>m_setIdleSlaveServer;
     static void scheduleTimer(uv_timer_t *timer);
     std::string m_strMasterIp;
-    int m_nMasterPort;
-    int allocateId = 0;
+    uint16_t m_nMasterPort;
+    uint32_t allocateId = 0;
+    uint32_t allocateUserId = 0;
+    unordered_map<uint32_t, Coflow>m_mapCoflowStatistic;
 protected:
     BEGIN_UV_BIND
         UV_BIND(CLoginMsg::MSG_ID, CLoginMsg)
@@ -36,6 +48,9 @@ protected:
         UV_BIND(CGetServerNumberMsg::MSG_ID,CGetServerNumberMsg)
         UV_BIND(CEditSchedulerMsg::MSG_ID, CEditSchedulerMsg)
         UV_BIND(CCheckMasterIdleMsg::MSG_ID, CCheckMasterIdleMsg)
+        UV_BIND(CClientLoginMsg::MSG_ID, CClientLoginMsg)
+        UV_BIND(CReportFlowStatistic::MSG_ID, CReportFlowStatistic)
+        UV_BIND(CEndCoflowTestMsg::MSG_ID, CEndCoflowTestMsg)
     END_UV_BIND(CTCPServer)
 
     int OnUvMessage(const CLoginMsg &msg, TcpClientCtx *pClient);
@@ -44,5 +59,8 @@ protected:
     int OnUvMessage(const CGetServerNumberMsg &msg, TcpClientCtx *pClient);
     int OnUvMessage(const CEditSchedulerMsg &msg, TcpClientCtx *pClient);
     int OnUvMessage(const CCheckMasterIdleMsg &msg, TcpClientCtx *pClient);
+    int OnUvMessage(const CClientLoginMsg &msg, TcpClientCtx *pClient);
+    int OnUvMessage(const CReportFlowStatistic &msg, TcpClientCtx *pClient);
+    int OnUvMessage(const CEndCoflowTestMsg &msg, TcpClientCtx *pClient);
 private:
 };

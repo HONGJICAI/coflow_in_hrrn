@@ -5,7 +5,6 @@
 #include "simple_uv/common.h"
 
 bool HRRN;
-static unordered_map<int, CClientSlave>hashmap;
 CClient::CClient()
 {
     uv_async_init(this->GetLoop(), &m_asyncHandle, AfterFlowEnd);
@@ -40,11 +39,12 @@ void CClient::AfterFlowEnd(uv_async_t * async)
             client->m_coflow.flows[element.first].HRRNEndTime = element.second;
         else
             client->m_coflow.flows[element.first].SJFEndTime = element.second;
-        hashmap.erase(element.first);
+        client->hashmap.erase(element.first);
     }
     client->m_coflow.finifshedFlowNum += client->m_vectorEndedFlowId.size();
     if (client->m_coflow.finifshedFlowNum == client->m_coflow.flows.size()) {
         printf("coflow finished\n");
+        client->SendUvMessage(CEndCoflowTestMsg{}, CEndCoflowTestMsg::MSG_ID);
         client->m_coflow.finifshedFlowNum = 0;
         if (HRRN)
             client->HRRNOver = true;
@@ -55,22 +55,24 @@ void CClient::AfterFlowEnd(uv_async_t * async)
 }
 Coflow CClient::generateCoflow()//生成coflow
 {
-    const static int flowSize[] = { 10,100,1000 };
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
-    static uniform_int_distribution<int> u1(0, this->serverNumber - 1);
-    static uniform_int_distribution<int> u2(0, sizeof(flowSize) / sizeof(int) - 1); //随机的flowSize
-    static uniform_int_distribution<int> u3(0x80000000, 0x7fffffff); //随机的flowId
-    static std::unordered_set<int>usedFlowId;
-    int job = 5 * u1(gen) + 10;//随机个数的flow
-    int id;
+    while (this->serverNumber == -1)//获取到后结束循环
+        uv_thread_sleep(1);
+    const static uint32_t flowSize[] = { 100,1000,10000 };
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    uniform_int_distribution<uint32_t> u1(0, this->serverNumber - 1);//随机的目标服务器
+    uniform_int_distribution<uint32_t> u2(0, sizeof(flowSize) / sizeof(int) - 1); //随机的flowSize
+    uniform_int_distribution<uint32_t> u3(0, 0xffffffff); //随机的flowId
+    static std::unordered_set<uint32_t>usedFlowId;
+    uint32_t job = 5 * u1(gen) + 10;//随机个数的flow
+    uint32_t id;
     Coflow res;
     for (int i = 0; i < job; ++i) {//随机分配在服务器中
         do {
             id = u3(gen);
         } while (usedFlowId.find(id) != usedFlowId.end());
         usedFlowId.insert(id);
-        res.flows.insert(make_pair(id, Flow{ u1(gen),flowSize[u2(gen)],0,0,id }));
+        res.flows.insert(make_pair(id, Flow{ u1(gen),flowSize[u2(gen)] }));
     }
     res.finifshedFlowNum = 0;
     return res;
@@ -115,18 +117,65 @@ int CClient::OnUvMessage(const CStartFlowRequestMsg & msg, TcpClientCtx * pClien
 {
     hashmap[msg.flowId].setAsyncHandle(&m_asyncHandle);
     hashmap[msg.flowId].getFlow(ip_int2string(msg.ip),htons(msg.port),msg.flowSize,msg.flowId);
+    if (HRRN)
+        m_coflow.flows[msg.flowId].HRRNStartTime = uv_now(GetLoop());
+    else
+        m_coflow.flows[msg.flowId].SJFStartTime = uv_now(GetLoop());
     return 0;
 }
 
 int CClient::OnUvMessage(const CCheckMasterIdleMsg & msg, TcpClientCtx * pClient)
 {
-    masterIdle = true;
+    masterIdle = msg.idle;
     return 0;
 }
 
 int CClient::OnUvMessage(const CEditSchedulerMsg & msg, TcpClientCtx * pClient)
 {
     HRRN = msg.hrrn;
+    return 0;
+}
+
+int CClient::OnUvMessage(const CStartCoflowTestMsg & msg, TcpClientCtx * pClient)
+{
+    HRRN = msg.hrrn;
+    static bool once = true;
+    if (once) {
+        m_coflow = generateCoflow();
+        once = false;
+    }
+    startCoflowTest();
+    return 0;
+}
+
+int CClient::OnUvMessage(const CClientLoginMsg & msg, TcpClientCtx * pClient)
+{
+    clientId = msg.userId;
+    return 0;
+}
+#include <stdlib.h>
+int CClient::OnUvMessage(const CKillClientMsg & msg, TcpClientCtx * pClient)
+{
+    ::exit(0);
+    return 0;
+}
+
+int CClient::OnUvMessage(const CEndCoflowTestMsg & msg, TcpClientCtx * pClient)
+{
+    CReportFlowStatistic statistic;
+    statistic.userId = this->clientId;
+    statistic.HRRNCreateTime = m_coflow.HRRNCreateTime;
+    statistic.SJFCreateTime = m_coflow.SJFCreateTime;
+    for (auto &element : m_coflow.flows) {
+        statistic.flowSize = element.second.flowSize;
+        statistic.flowId = element.first;
+        statistic.HRRNStartTime = element.second.HRRNStartTime;
+        statistic.SJFStartTime = element.second.SJFStartTime;
+        statistic.HRRNEndTime = element.second.HRRNEndTime;
+        statistic.SJFEndTime = element.second.SJFEndTime;
+        SendUvMessage(statistic, statistic.MSG_ID);
+    }
+    SendUvMessage(CEndCoflowTestMsg{}, CEndCoflowTestMsg::MSG_ID);
     return 0;
 }
 
@@ -142,28 +191,28 @@ int main() {
         printf("error on connect");
         return -1;
     }
+    client.SendUvMessage(CClientLoginMsg{}, CClientLoginMsg::MSG_ID);
     client.SendUvMessage(CGetServerNumberMsg{}, CGetServerNumberMsg::MSG_ID);//获取服务器总数
-    while (client.serverNumber == -1)//获取到后结束循环
-        uv_thread_sleep(1);
+    if (0) {
+        client.m_coflow = client.generateCoflow();
+        client.startCoflowTest();//开始SJF coflow测试 
+        while (!client.SJFOver)
+            uv_thread_sleep(10);
+        CClient::analyseCoflow(client.m_coflow);
 
-    client.m_coflow = client.generateCoflow();
-    client.startCoflowTest();//开始SJF coflow测试 
-    while (!client.SJFOver)
-        uv_thread_sleep(10);
-    CClient::analyseCoflow(client.m_coflow);
-
-    uv_thread_sleep(1000);
-    while (!client.masterIdle) {
-        client.checkMasterIdle();
-        uv_thread_sleep(10);
+        uv_thread_sleep(1000);
+        while (!client.masterIdle) {
+            client.checkMasterIdle();
+            uv_thread_sleep(10);
+        }
+        client.editMasterScheduler(1);
+        while (!HRRN)
+            uv_thread_sleep(10);
+        client.startCoflowTest();//开始HRRN coflow测试
+        while (!client.HRRNOver)
+            uv_thread_sleep(10);
+        CClient::analyseCoflow(client.m_coflow);
     }
-    client.editMasterScheduler(1);
-    while (!HRRN)
+    while (!client.exit)
         uv_thread_sleep(10);
-    client.startCoflowTest();//开始HRRN coflow测试
-    while (!client.HRRNOver)
-        uv_thread_sleep(10);
-
-    CClient::analyseCoflow(client.m_coflow);
-    std::cin >> HRRN;
 }

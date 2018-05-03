@@ -91,42 +91,11 @@ void CSlaveServer::LoginOnMaster()
     m_pTcpClient->SendUvMessage(msg, msg.MSG_ID);
 }
 
-void CSlaveServer::LoadConfig() {
-    const string file = "slave.config";
-    Config configure;
-    if (!configure.FileExist(file)) {
-        LOGFMTE("cannot find configure file");
-        return;
-    }
-    configure.ReadFile(file);
-    {
-        //string list;
-        //list = configure.Read("files", list);
-        //stringstream ss(list);
-        //string tuple;
-        //while (!ss.eof()) {
-        //    getline(ss, tuple, ';');
-        //    int offset = tuple.find(':');
-        //    if (offset == string::npos) {
-        //        LOGE("error on file configure");
-        //        continue;
-        //    }
-        //    m_mapLocalFile[tuple.substr(0, offset)] = (uint64_t)stoll(tuple.substr(offset + 1));
-        //}
-    }
-    {
-        //m_strMasterIp = "0.0.0.0";
-        //m_strMasterIp = configure.Read("master_ip", m_strMasterIp);
-        //m_nMasterPort = configure.Read("master_port", 10000);
-    }
-}
-
 int main(int argc, char** argv) {
     if (argc == 2)
         port = stoi(argv[1]);
     zsummer::log4z::ILog4zManager::getRef().start();
     CSlaveServer server;
-    //server.LoadConfig();
     if (!server.Start()) {
         fprintf(stdout, "Start Server error:%s\n", server.GetLastErrMsg());
         return -1;

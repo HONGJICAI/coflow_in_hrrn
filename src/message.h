@@ -1,11 +1,30 @@
 #pragma once
 #include <stdint.h>
+#include <unordered_map>
 #pragma pack(1)
+
+struct Flow {
+    uint32_t targetServer;
+    uint32_t flowSize;
+    uint64_t SJFStartTime;
+    uint64_t HRRNStartTime;
+    uint64_t SJFEndTime;
+    uint64_t HRRNEndTime;
+};
+struct Coflow {
+    unordered_map<uint32_t, Flow>flows;
+    uint64_t SJFCreateTime;
+    uint64_t SJFEndTime;
+    uint64_t HRRNCreateTime;
+    uint64_t HRRNEndTime;
+    uint32_t finifshedFlowNum;
+};
+
 enum SlaveAndMaster{
-	PUSH_FILE_INFO = 1000,
-    LOGIN_MSG,
+    LOGIN_MSG=1000,
     LOGIN_RSP_MSG,
-    IDLE_MSG
+    IDLE_MSG,
+    KILL_SLAVE
 };
 class CLoginMsg {
 public :
@@ -20,68 +39,59 @@ public:
     enum {
         MSG_ID = SlaveAndMaster::LOGIN_MSG
     };
-    int id;
+    uint32_t id;
 };
-//class CPushFileInfoMsg {
-//public:
-//    enum {
-//        MSG_ID = PUSH_FILE_INFO
-//    };
-//    uint32_t ip;
-//    uint16_t port;
-//    uint32_t len;
-//    char filename[16];
-//};
 class CIdleMsg {
 public:
     enum {
         MSG_ID = IDLE_MSG
     };
-    int id;
+    uint32_t id;
+};
+class CKillSlaveMsg {
+public:
+    enum {
+        MSG_ID = KILL_SLAVE
+    };
+    char reserve;
 };
 
 enum ClientAndMaster {
-    GET_FILE_LOCATION = 2000,
-    GET_SERVER_NUMBER,
+    GET_SERVER_NUMBER=2000,
     CREATE_FLOW_JOB,
     START_FLOW_REQUEST,
     EDIT_SCHEDULER,
-    IS_MASTER_IDLE
+    IS_MASTER_IDLE,
+    CLIENT_LOGIN,
+    START_COFLOW_TEST,
+    END_COFLOW_TEST,
+    REPORT_FLOW_STATISTIC,
+    KILL_CLIENT
 };
-//class CGetFileLocationMsg {
-//public:
-//    enum {
-//        MSG_ID = GET_FILE_LOCATION
-//    };
-//    uint32_t ip;
-//    uint16_t port;
-//    uint32_t len;
-//    char filename[16];
-//};
 class CGetServerNumberMsg {
 public:
     enum {
         MSG_ID = GET_SERVER_NUMBER
     };
-    int number;
+    uint32_t number;
 };
 class CCreateFlowJobMsg {
 public:
     enum {
         MSG_ID = CREATE_FLOW_JOB
     };
-    int targetServerId;
-    int flowSize;
-    int flowId;
+    uint32_t targetServerId;
+    uint32_t flowSize;
+    uint32_t flowId;
 };
 class CStartFlowRequestMsg {
 public:
     enum {
         MSG_ID = START_FLOW_REQUEST
     };
-    int targetServerId;
-    int flowSize;
-    int flowId;
+    uint32_t targetServerId;
+    uint32_t flowSize;
+    uint32_t flowId;
     uint32_t ip;
     uint16_t port;
 };
@@ -99,6 +109,50 @@ public:
     };
     bool idle;
 };
+class CClientLoginMsg {
+public:
+    enum {
+        MSG_ID = CLIENT_LOGIN
+    };
+    uint32_t userId;
+};
+class CStartCoflowTestMsg {
+public:
+    enum {
+        MSG_ID = START_COFLOW_TEST
+    };
+    bool hrrn;
+};
+class CEndCoflowTestMsg {
+public:
+    enum {
+        MSG_ID = END_COFLOW_TEST
+    };
+    char reserve;
+};
+class CKillClientMsg {
+public:
+    enum {
+        MSG_ID = KILL_CLIENT
+    };
+    char reserve;
+};
+class CReportFlowStatistic {
+public:
+    enum {
+        MSG_ID = REPORT_FLOW_STATISTIC
+    };
+    uint32_t userId;
+    uint32_t flowId;
+    uint32_t flowSize;
+    uint32_t targetServer;
+    uint64_t SJFCreateTime;
+    uint64_t SJFStartTime;
+    uint64_t SJFEndTime;
+    uint64_t HRRNCreateTime;
+    uint64_t HRRNStartTime;
+    uint64_t HRRNEndTime;
+};
 
 enum ClientAndSlave {
     GET_FLOW = 3000,
@@ -109,7 +163,7 @@ public:
     enum {
         MSG_ID = GET_FLOW
     };
-    int flowSize;
+    uint32_t flowSize;
 };
 class CPushFlowMsg {
 public:

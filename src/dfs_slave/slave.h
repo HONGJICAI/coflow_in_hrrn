@@ -12,7 +12,6 @@ class CSlaveServer :
 public:
     CSlaveServer();
     virtual ~CSlaveServer();
-    void LoadConfig();
     bool Start();
 
     void LoginOnMaster();
