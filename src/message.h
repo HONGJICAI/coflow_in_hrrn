@@ -2,22 +2,24 @@
 #include <stdint.h>
 #include <unordered_map>
 #pragma pack(1)
+enum ScheduleAlgorithm {
+    SJF,
+    HRRN,
+    SCF,
+    CHRRN
+};
 
 struct Flow {
     uint32_t targetServer;
     uint32_t flowSize;
-    uint64_t SJFStartTime;
-    uint64_t HRRNStartTime;
-    uint64_t SJFEndTime;
-    uint64_t HRRNEndTime;
+    unordered_map<int, uint64_t>startTime;
+    unordered_map<int, uint64_t>endTime;
 };
 struct Coflow {
     unordered_map<uint32_t, Flow>flows;
-    uint64_t SJFCreateTime;
-    uint64_t SJFEndTime;
-    uint64_t HRRNCreateTime;
-    uint64_t HRRNEndTime;
-    uint32_t finifshedFlowNum;
+    unordered_map<int, uint64_t>createTime;
+    unordered_map<int, uint64_t>endTime;
+    uint32_t coflowSize;
 };
 
 enum SlaveAndMaster{
@@ -83,6 +85,7 @@ public:
     uint32_t targetServerId;
     uint32_t flowSize;
     uint32_t flowId;
+    uint32_t coflowSize;
 };
 class CStartFlowRequestMsg {
 public:
@@ -121,7 +124,7 @@ public:
     enum {
         MSG_ID = START_COFLOW_TEST
     };
-    bool hrrn;
+    int scheduleAlgorithm;
 };
 class CEndCoflowTestMsg {
 public:
@@ -152,6 +155,12 @@ public:
     uint64_t HRRNCreateTime;
     uint64_t HRRNStartTime;
     uint64_t HRRNEndTime;
+    uint64_t SCFCreateTime;
+    uint64_t SCFStartTime;
+    uint64_t SCFEndTime;
+    uint64_t CHRRNCreateTime;
+    uint64_t CHRRNStartTime;
+    uint64_t CHRRNEndTime;
 };
 
 enum ClientAndSlave {

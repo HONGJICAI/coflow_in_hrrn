@@ -4,7 +4,7 @@
 #include "client.h"
 #include "simple_uv/common.h"
 
-bool HRRN;
+int scheduleAlgorithm;
 CClient::CClient()
 {
     uv_async_init(this->GetLoop(), &m_asyncHandle, AfterFlowEnd);
@@ -17,16 +17,21 @@ CClient::~CClient()
 
 void CClient::startCoflowTest()
 {
-    printf("start %s coflow test\n",HRRN?"HRRN":"SJF");
-    if (HRRN)
-        m_coflow.HRRNCreateTime = uv_now(this->GetLoop());
-    else
-        m_coflow.SJFCreateTime = uv_now(this->GetLoop());
+    string str;
+    switch (scheduleAlgorithm) {
+    case ScheduleAlgorithm::HRRN:str = "HRRN"; break;
+    case ScheduleAlgorithm::SJF:str = "SJF"; break;
+    case ScheduleAlgorithm::SCF:str = "SCF"; break;
+    case ScheduleAlgorithm::CHRRN:str = "CHRRN"; break;
+    }
+    printf("start %s coflow test\n",str.c_str());
+    m_coflow.createTime[scheduleAlgorithm] = uv_now(this->GetLoop());
     for (auto &flow : m_coflow.flows) {
         CCreateFlowJobMsg msg;
         msg.flowSize = flow.second.flowSize;
         msg.targetServerId = flow.second.targetServer;
         msg.flowId = flow.first;
+        msg.coflowSize = m_coflow.coflowSize;
         this->SendUvMessage(msg, msg.MSG_ID);
     }
 }
@@ -35,21 +40,14 @@ void CClient::AfterFlowEnd(uv_async_t * async)
     CClient* client = reinterpret_cast<CClient*>(async->data);
     CUVAutoLock lock(&client->m_mutex);
     for (auto &element : client->m_vectorEndedFlowId) {
-        if (HRRN)
-            client->m_coflow.flows[element.first].HRRNEndTime = element.second;
-        else
-            client->m_coflow.flows[element.first].SJFEndTime = element.second;
+        client->m_coflow.flows[element.first].endTime[scheduleAlgorithm] = element.second;
         client->hashmap.erase(element.first);
     }
-    client->m_coflow.finifshedFlowNum += client->m_vectorEndedFlowId.size();
-    if (client->m_coflow.finifshedFlowNum == client->m_coflow.flows.size()) {
+    client->finifshedFlowNum += client->m_vectorEndedFlowId.size();
+    if (client->finifshedFlowNum == client->m_coflow.flows.size()) {
         printf("coflow finished\n");
         client->SendUvMessage(CEndCoflowTestMsg{}, CEndCoflowTestMsg::MSG_ID);
-        client->m_coflow.finifshedFlowNum = 0;
-        if (HRRN)
-            client->HRRNOver = true;
-        else
-            client->SJFOver = true;
+        client->finifshedFlowNum = 0;
     }
     client->m_vectorEndedFlowId.clear();
 }
@@ -57,7 +55,7 @@ Coflow CClient::generateCoflow()//生成coflow
 {
     while (this->serverNumber == -1)//获取到后结束循环
         uv_thread_sleep(1);
-    const static uint32_t flowSize[] = { 100,1000,10000 };
+    const static uint32_t flowSize[] = { 100,1000,5000,10000 };
     std::random_device rd;
     std::mt19937 gen(rd());
     uniform_int_distribution<uint32_t> u1(0, this->serverNumber - 1);//随机的目标服务器
@@ -72,25 +70,11 @@ Coflow CClient::generateCoflow()//生成coflow
             id = u3(gen);
         } while (usedFlowId.find(id) != usedFlowId.end());
         usedFlowId.insert(id);
-        res.flows.insert(make_pair(id, Flow{ u1(gen),flowSize[u2(gen)] }));
+        auto retPair = res.flows.insert(make_pair(id, Flow{ u1(gen),flowSize[u2(gen)] }));
+        res.coflowSize += retPair.first->second.flowSize;
     }
-    res.finifshedFlowNum = 0;
+    finifshedFlowNum = 0;
     return res;
-}
-
-void CClient::analyseCoflow(Coflow & coflow)
-{
-    auto it = max_element(coflow.flows.begin(), coflow.flows.end(), [](const pair<const int,Flow> &a, const pair<const int, Flow> &b){
-        if (HRRN)
-            return a.second.HRRNEndTime < b.second.HRRNEndTime;
-        return a.second.SJFEndTime < b.second.SJFEndTime;
-    });
-    uint64_t time;
-    if (HRRN)
-        time = it->second.HRRNEndTime - coflow.HRRNCreateTime;
-    else
-        time = it->second.SJFEndTime - coflow.SJFCreateTime;
-    printf("%s takes %llums\n", HRRN ? "HRRN" : "SJF", time);
 }
 
 void CClient::pushEndedFlowId(int flowId,uint64_t endTime)
@@ -100,45 +84,17 @@ void CClient::pushEndedFlowId(int flowId,uint64_t endTime)
     uv_async_send(&m_asyncHandle);
 }
 
-void CClient::checkMasterIdle()
-{
-    masterIdle = false;
-    CCheckMasterIdleMsg msg{};
-    SendUvMessage(msg, msg.MSG_ID);
-}
-
-void CClient::editMasterScheduler(bool hrrn)
-{
-    CEditSchedulerMsg msg{ hrrn };
-    SendUvMessage(msg, msg.MSG_ID);
-}
-
 int CClient::OnUvMessage(const CStartFlowRequestMsg & msg, TcpClientCtx * pClient)
 {
     hashmap[msg.flowId].setAsyncHandle(&m_asyncHandle);
     hashmap[msg.flowId].getFlow(ip_int2string(msg.ip),htons(msg.port),msg.flowSize,msg.flowId);
-    if (HRRN)
-        m_coflow.flows[msg.flowId].HRRNStartTime = uv_now(GetLoop());
-    else
-        m_coflow.flows[msg.flowId].SJFStartTime = uv_now(GetLoop());
-    return 0;
-}
-
-int CClient::OnUvMessage(const CCheckMasterIdleMsg & msg, TcpClientCtx * pClient)
-{
-    masterIdle = msg.idle;
-    return 0;
-}
-
-int CClient::OnUvMessage(const CEditSchedulerMsg & msg, TcpClientCtx * pClient)
-{
-    HRRN = msg.hrrn;
+    m_coflow.flows[msg.flowId].startTime[scheduleAlgorithm] = uv_now(GetLoop());
     return 0;
 }
 
 int CClient::OnUvMessage(const CStartCoflowTestMsg & msg, TcpClientCtx * pClient)
 {
-    HRRN = msg.hrrn;
+    scheduleAlgorithm = msg.scheduleAlgorithm;
     static bool once = true;
     if (once) {
         m_coflow = generateCoflow();
@@ -164,15 +120,21 @@ int CClient::OnUvMessage(const CEndCoflowTestMsg & msg, TcpClientCtx * pClient)
 {
     CReportFlowStatistic statistic;
     statistic.userId = this->clientId;
-    statistic.HRRNCreateTime = m_coflow.HRRNCreateTime;
-    statistic.SJFCreateTime = m_coflow.SJFCreateTime;
+    statistic.HRRNCreateTime = m_coflow.createTime[ScheduleAlgorithm::HRRN];
+    statistic.SJFCreateTime = m_coflow.createTime[ScheduleAlgorithm::SJF];
+    statistic.CHRRNCreateTime = m_coflow.createTime[ScheduleAlgorithm::CHRRN];
+    statistic.SCFCreateTime = m_coflow.createTime[ScheduleAlgorithm::SCF];
     for (auto &element : m_coflow.flows) {
         statistic.flowSize = element.second.flowSize;
         statistic.flowId = element.first;
-        statistic.HRRNStartTime = element.second.HRRNStartTime;
-        statistic.SJFStartTime = element.second.SJFStartTime;
-        statistic.HRRNEndTime = element.second.HRRNEndTime;
-        statistic.SJFEndTime = element.second.SJFEndTime;
+        statistic.HRRNStartTime = element.second.startTime[ScheduleAlgorithm::HRRN];
+        statistic.SJFStartTime = element.second.startTime[ScheduleAlgorithm::SJF];
+        statistic.CHRRNStartTime = element.second.startTime[ScheduleAlgorithm::CHRRN];
+        statistic.SCFStartTime = element.second.startTime[ScheduleAlgorithm::SCF];
+        statistic.HRRNEndTime = element.second.endTime[ScheduleAlgorithm::HRRN];
+        statistic.SJFEndTime = element.second.endTime[ScheduleAlgorithm::SJF];
+        statistic.CHRRNEndTime = element.second.endTime[ScheduleAlgorithm::CHRRN];
+        statistic.SCFEndTime = element.second.endTime[ScheduleAlgorithm::SCF];
         SendUvMessage(statistic, statistic.MSG_ID);
     }
     SendUvMessage(CEndCoflowTestMsg{}, CEndCoflowTestMsg::MSG_ID);
@@ -193,26 +155,7 @@ int main() {
     }
     client.SendUvMessage(CClientLoginMsg{}, CClientLoginMsg::MSG_ID);
     client.SendUvMessage(CGetServerNumberMsg{}, CGetServerNumberMsg::MSG_ID);//获取服务器总数
-    if (0) {
-        client.m_coflow = client.generateCoflow();
-        client.startCoflowTest();//开始SJF coflow测试 
-        while (!client.SJFOver)
-            uv_thread_sleep(10);
-        CClient::analyseCoflow(client.m_coflow);
 
-        uv_thread_sleep(1000);
-        while (!client.masterIdle) {
-            client.checkMasterIdle();
-            uv_thread_sleep(10);
-        }
-        client.editMasterScheduler(1);
-        while (!HRRN)
-            uv_thread_sleep(10);
-        client.startCoflowTest();//开始HRRN coflow测试
-        while (!client.HRRNOver)
-            uv_thread_sleep(10);
-        CClient::analyseCoflow(client.m_coflow);
-    }
-    while (!client.exit)
+    while (1)
         uv_thread_sleep(10);
 }
