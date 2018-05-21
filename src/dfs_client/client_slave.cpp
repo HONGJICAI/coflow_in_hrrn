@@ -28,7 +28,7 @@ void CClientSlave::setAsyncHandle(uv_async_t * async)
 int CClientSlave::OnUvMessage(const CPushFlowMsg & msg, TcpClientCtx * pClient)
 {
     if (msg.currentPacketNum == msg.totalPacketNum) {
-        printf("flow finish,id %d\n");
+        printf("flow finish,id %u\n",m_nFlowId);
         CClient *mainClient = reinterpret_cast<CClient*>(m_asyncHandle->data);
         mainClient->pushEndedFlowId(m_nFlowId,uv_now(this->GetLoop()));
     }

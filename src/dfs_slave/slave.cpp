@@ -58,20 +58,36 @@ bool CSlaveServer::Start()
     return CTCPServer::Start(m_strLocalIp.c_str(), m_nLocalPort);
 }
 
+int totalSize;
+TcpClientCtx * g_pClient;
 int CSlaveServer::OnUvMessage(const CGetFlowMsg & msg, TcpClientCtx * pClient)
 {
     LOGFMTI("start execute job");
-    int totalSize = msg.flowSize;
-    CPushFlowMsg data;
-    data.totalPacketNum = msg.flowSize;
-    data.currentPacketNum = 1;
-    while (data.currentPacketNum <= data.totalPacketNum) {
-        this->SendUvMessage(data, data.MSG_ID, pClient);
-        ++data.currentPacketNum;
-        uv_thread_sleep(1);
+    static uv_timer_t timer;
+    static bool init = false;
+    if (!init) {
+        uv_timer_init(this->GetLoop(), &timer);
+        timer.data = this;
+        init = true;
     }
-    LOGFMTI("job completed");
-    m_pTcpClient->SendUvMessage(CIdleMsg{m_pTcpClient->id}, CIdleMsg::MSG_ID);
+    totalSize = msg.flowSize;
+    g_pClient = pClient;
+    uv_timer_start(&timer, [](uv_timer_t *timer) {
+        CSlaveServer *slave = reinterpret_cast<CSlaveServer*>(timer->data);
+        static int currentPacketNum = 1;
+        CPushFlowMsg data;
+        data.totalPacketNum = totalSize;
+        data.currentPacketNum = currentPacketNum;
+        slave->SendUvMessage(data, data.MSG_ID, g_pClient);
+        ++currentPacketNum;
+        if (currentPacketNum > totalSize) {
+            currentPacketNum = 1;
+            uv_timer_stop(timer);
+            LOGFMTI("job completed");
+            slave->m_pTcpClient->SendUvMessage(CIdleMsg{slave->m_pTcpClient->id}, CIdleMsg::MSG_ID);
+        }
+    },1,1);
+
     return 0;
 }
 #include "../simple_uv/common.h"

@@ -18,8 +18,11 @@ struct Flow {
 struct Coflow {
     unordered_map<uint32_t, Flow>flows;
     unordered_map<int, uint64_t>createTime;
+    unordered_map<int, uint64_t>startTime;
     unordered_map<int, uint64_t>endTime;
     uint32_t coflowSize;
+    uint32_t coflowLength;
+    uint32_t coflowWidth;
 };
 
 enum SlaveAndMaster{

@@ -26,6 +26,7 @@ public:
     virtual ~CMasterServer();
     bool Start();
     void startCoflowTest(int _scheduleAlgorithm);
+    void startCoflowTestById(int id);
     void killSlave();
     void killClient();
     void endCoflowTest();
@@ -47,8 +48,6 @@ protected:
         UV_BIND(CIdleMsg::MSG_ID, CIdleMsg)
         UV_BIND(CCreateFlowJobMsg::MSG_ID, CCreateFlowJobMsg)
         UV_BIND(CGetServerNumberMsg::MSG_ID,CGetServerNumberMsg)
-        //UV_BIND(CEditSchedulerMsg::MSG_ID, CEditSchedulerMsg)
-        //UV_BIND(CCheckMasterIdleMsg::MSG_ID, CCheckMasterIdleMsg)
         UV_BIND(CClientLoginMsg::MSG_ID, CClientLoginMsg)
         UV_BIND(CReportFlowStatistic::MSG_ID, CReportFlowStatistic)
         UV_BIND(CEndCoflowTestMsg::MSG_ID, CEndCoflowTestMsg)
@@ -58,8 +57,6 @@ protected:
     int OnUvMessage(const CIdleMsg &msg, TcpClientCtx *pClient);
     int OnUvMessage(const CCreateFlowJobMsg &msg, TcpClientCtx *pClient);
     int OnUvMessage(const CGetServerNumberMsg &msg, TcpClientCtx *pClient);
-    //int OnUvMessage(const CEditSchedulerMsg &msg, TcpClientCtx *pClient);
-    //int OnUvMessage(const CCheckMasterIdleMsg &msg, TcpClientCtx *pClient);
     int OnUvMessage(const CClientLoginMsg &msg, TcpClientCtx *pClient);
     int OnUvMessage(const CReportFlowStatistic &msg, TcpClientCtx *pClient);
     int OnUvMessage(const CEndCoflowTestMsg &msg, TcpClientCtx *pClient);

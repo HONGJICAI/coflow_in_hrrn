@@ -55,14 +55,14 @@ Coflow CClient::generateCoflow()//生成coflow
 {
     while (this->serverNumber == -1)//获取到后结束循环
         uv_thread_sleep(1);
-    const static uint32_t flowSize[] = { 100,1000,5000,10000 };
+    const static uint32_t flowSize[] = { 400,500,600 };
     std::random_device rd;
     std::mt19937 gen(rd());
     uniform_int_distribution<uint32_t> u1(0, this->serverNumber - 1);//随机的目标服务器
     uniform_int_distribution<uint32_t> u2(0, sizeof(flowSize) / sizeof(int) - 1); //随机的flowSize
     uniform_int_distribution<uint32_t> u3(0, 0xffffffff); //随机的flowId
     static std::unordered_set<uint32_t>usedFlowId;
-    uint32_t job = 5 * u1(gen) + 10;//随机个数的flow
+    uint32_t job = 2 * u1(gen) + 8;//随机个数的flow
     uint32_t id;
     Coflow res;
     for (int i = 0; i < job; ++i) {//随机分配在服务器中
@@ -72,12 +72,14 @@ Coflow CClient::generateCoflow()//生成coflow
         usedFlowId.insert(id);
         auto retPair = res.flows.insert(make_pair(id, Flow{ u1(gen),flowSize[u2(gen)] }));
         res.coflowSize += retPair.first->second.flowSize;
+        res.coflowLength = max(res.coflowLength, retPair.first->second.flowSize);
     }
+    res.coflowWidth = job;
     finifshedFlowNum = 0;
     return res;
 }
 
-void CClient::pushEndedFlowId(int flowId,uint64_t endTime)
+void CClient::pushEndedFlowId(uint32_t flowId,uint64_t endTime)
 {
     CUVAutoLock lock(&m_mutex);
     m_vectorEndedFlowId.push_back(make_pair(flowId,endTime));

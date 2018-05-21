@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <algorithm>
+#include <random>
 #include "simple_uv/config.h"
 #include "simple_uv/log4z.h"
 #include "simple_uv/common.h"
@@ -10,6 +11,7 @@ int scheduleAlgorithm;
 int coflowNum;
 uint32_t slaveNum = 1;
 int finishedCoflow = 0;
+int mode = 0;
 CMasterServer::CMasterServer() :
     m_strMasterIp("127.0.0.1"),
     m_nMasterPort(10000)
@@ -77,9 +79,34 @@ bool CMasterServer::Start()
 void CMasterServer::startCoflowTest(int _scheduleAlgorithm)
 {
     scheduleAlgorithm = _scheduleAlgorithm;
+    if (mode == 0) {//client同一时刻发起coflow
+        CStartCoflowTestMsg msg{ scheduleAlgorithm };
+        for (auto &element : m_vectorLoginUser)
+            SendUvMessage(msg, msg.MSG_ID, element);
+    }
+    else {//client依次发起coflow
+        static uv_timer_t timer;
+        static bool init = false;
+        if (init == false) {
+            timer.data = this;
+            uv_timer_init(this->GetLoop(), &timer);
+        }
+        uv_timer_start(&timer, [](uv_timer_t *timer) {
+            CMasterServer *master = reinterpret_cast<CMasterServer*>(timer->data);
+            static int id = 0;
+            master->startCoflowTestById(id++);
+            if (id == master->m_vectorLoginUser.size()) {
+                uv_timer_stop(timer);
+                id = 0;
+            }
+        }, 0, 1000);
+    }
+}
+
+void CMasterServer::startCoflowTestById(int id)
+{
     CStartCoflowTestMsg msg{ scheduleAlgorithm };
-    for (auto element : m_vectorLoginUser) 
-        SendUvMessage(msg, msg.MSG_ID, element);
+    this->SendUvMessage(msg, msg.MSG_ID, m_vectorLoginUser[id]);
 }
 
 void CMasterServer::killSlave()
@@ -102,53 +129,46 @@ void CMasterServer::endCoflowTest()
 
 void CMasterServer::analyseCoflow()
 {
-    for (auto &element : m_mapCoflowStatistic) {
-        for(int i=ScheduleAlgorithm::SJF;i<=ScheduleAlgorithm::CHRRN;++i)
-            element.second.endTime[i]= max_element(element.second.flows.begin(), element.second.flows.end(), [i](const pair<const uint32_t, Flow> &a, const pair<const uint32_t, Flow> &b) {
+    for (auto &element : m_mapCoflowStatistic) {//计算coflow结束时间和开始时间
+        for (int i = ScheduleAlgorithm::SJF; i <= ScheduleAlgorithm::CHRRN; ++i) {
+            element.second.endTime[i] = max_element(element.second.flows.begin(), element.second.flows.end(), [i](const pair<const uint32_t, Flow> &a, const pair<const uint32_t, Flow> &b) {
                 return a.second.endTime.at(i) < b.second.endTime.at(i);
             })->second.endTime[i];
+            element.second.startTime[i] = min_element(element.second.flows.begin(), element.second.flows.end(), [i](const pair<const uint32_t, Flow> &a, const pair<const uint32_t, Flow> &b) {
+                return a.second.startTime.at(i) < b.second.startTime.at(i);
+            })->second.endTime[i];
+        }
     }
 #include <fstream>
     fstream out("result.txt",ios::app);
-    //out << "flowId\tflowSize\tHRRN\tSJF\tCHRRN\tSCF" << endl;
-    //uint64_t HRRNCCT = 0, SJFCCT = 0,SCFCCT=0,CHRRNCCT=0;
-    //for (auto &element : m_mapCoflowStatistic) {
-    //    for (auto flow : element.second.flows) {
-    //        out << flow.first << "\t" << flow.second.flowSize<<"\t"
-    //            <<flow.second.startTime[ScheduleAlgorithm::HRRN] - element.second.createTime[ScheduleAlgorithm::HRRN] << "\t" 
-    //            << flow.second.startTime[SJF]-element.second.createTime[SJF] << "\t"
-    //            <<flow.second.startTime[ScheduleAlgorithm::CHRRN] - element.second.createTime[ScheduleAlgorithm::CHRRN] << "\t" 
-    //            << flow.second.startTime[SCF]-element.second.createTime[SCF] << "\t"
-    //            << endl;
-    //    }
-    //    out << "HRRN:" << element.second.endTime[HRRN] - element.second.createTime[HRRN] << endl;
-    //    out << "SJF:" << element.second.endTime[SJF] - element.second.createTime[SJF] << endl;
-    //    out << "CHRRN:" << element.second.endTime[CHRRN] - element.second.createTime[CHRRN] << endl;
-    //    out << "SCF:" << element.second.endTime[SCF] - element.second.createTime[SCF] << endl;
-    //    HRRNCCT += (element.second.endTime[HRRN] - element.second.createTime[HRRN]) / double(coflowNum);
-    //    SJFCCT += (element.second.endTime[SJF] - element.second.createTime[SJF]) / double(coflowNum);
-    //    CHRRNCCT += (element.second.endTime[CHRRN] - element.second.createTime[CHRRN]) / double(coflowNum);
-    //    SCFCCT += (element.second.endTime[SCF] - element.second.createTime[SCF]) / double(coflowNum);
-    //}
-    //out << "HRRN CCT:" << HRRNCCT << ",SJF CCT:" << SJFCCT;
-    //out << ",CHRRN CCT:" << CHRRNCCT << ",SCF CCT:" << SCFCCT << endl;
-    uint64_t fct[4] = {};
-    uint64_t fdt[4] = {};
+    out << "------------timestamp:" << uv_now(this->GetLoop()) << "------------" << endl;
     uint64_t cct[4] = {};
-    for (auto &element : m_mapCoflowStatistic) {
-        for (auto &flow : element.second.flows) {
-            for (int i = ScheduleAlgorithm::SJF; i <= ScheduleAlgorithm::CHRRN; ++i) {
-                fct[i] += flow.second.endTime[i] - flow.second.startTime[i];
-                fdt[i] += flow.second.startTime[i] - element.second.createTime[i];
-            }
+    uint64_t cdt[4] = {};
+    uint64_t mdt[4] = {};
+    string scf="scf=[", chrrn="chrrn=[";
+    out << "flow config:" << endl;
+    out << "coflowId flowId flowSize targetServer "<<endl;
+    for (int i = 0; i < m_mapCoflowStatistic.size();++i) {
+        auto element = m_mapCoflowStatistic.at(i);
+        for (auto &flow : element.flows) {
+            out << i << " & " << flow.first << " & " << flow.second.flowSize << " & " << flow.second.targetServer << endl;
         }
         for (int i = ScheduleAlgorithm::SJF; i <= ScheduleAlgorithm::CHRRN; ++i) {
-            cct[i] += element.second.endTime[i] - element.second.createTime[i];
+            cct[i] += element.endTime[i] - element.createTime[i];
+            cdt[i] += element.startTime[i] - element.createTime[i];
+            mdt[i] = max(mdt[i], element.startTime[i] - element.createTime[i]);
         }
+        scf+=to_string( element.endTime[SCF] - element.createTime[SCF])+ ",";
+        chrrn += to_string(element.endTime[CHRRN] - element.createTime[CHRRN]) + ",";
     }
-    out << "HRRN CCT:" << cct[HRRN] << ",SJF CCT:" << cct[SJF] << ",CHRRN CCT:" << cct[CHRRN] << ",SCF CCT:" << cct[SCF] << endl;
-    out << "HRRN FDT:" << fdt[HRRN] << ",SJF FDT:" << fdt[SJF] << ",CHRRN FDT:" << fdt[CHRRN] << ",SCF FDT:" << fdt[SCF] << endl;
-    out << "HRRN FCT:" << fct[HRRN] << ",SJF FCT:" << fct[SJF] << ",CHRRN FCT:" << fct[CHRRN] << ",SCF FCT:" << fct[SCF] << endl;
+    scf.pop_back(),chrrn.pop_back();
+    scf += "]", chrrn += "]";
+    out << scf << endl << chrrn << endl;
+    out << "method\tCCT\tMST\tCST\t" << endl;
+    out << "SJF\t" << cct[SJF] << "\t" <<mdt[SJF]<<"\t"<< cdt[SJF]<< endl;
+    out << "HRRN\t" << cct[HRRN] << "\t" << mdt[HRRN] << "\t" << cdt[HRRN] << endl;
+    out << "SCF\t" << cct[SCF] << "\t" << mdt[SCF] << "\t" << cdt[SCF]<< endl;
+    out << "CHRRN\t" << cct[CHRRN] << "\t" << mdt[CHRRN] << "\t" << cdt[CHRRN]<< endl;
     out.close();
     ::exit(0);
 }
@@ -162,7 +182,7 @@ void CMasterServer::scheduleTimer(uv_timer_t * timer)
         auto &queueRequest = master->m_queueRequest[serverId];
         if (queueRequest.size()) {//若空闲服务器有未完成任务
             busyServer.push_back(serverId);//将有任务做的server从idle队列移动到busy队列
-            auto it = min_element(queueRequest.begin(), queueRequest.end(), [master,now](const Request&a,const Request &b) {
+            auto it = min_element(queueRequest.begin(), queueRequest.end(), [now](const Request&a,const Request &b) {
                 //找到优先级最高的任务
                 switch (scheduleAlgorithm)
                 {
@@ -174,6 +194,7 @@ void CMasterServer::scheduleTimer(uv_timer_t * timer)
                 case ScheduleAlgorithm::SCF:
                     return a.coflowSize < b.coflowSize;
                 case ScheduleAlgorithm::CHRRN:
+                    cout<< double(now - a.requestTime) / (2 * a.coflowSize / slaveNum)<<"&"<< double(now - b.requestTime) / (2 * b.coflowSize / slaveNum)<<endl;
                     return double(now - a.requestTime) / (2*a.coflowSize/slaveNum)>double(now - b.requestTime) / (2*b.coflowSize/slaveNum);
                 }
             });
@@ -208,21 +229,6 @@ int CMasterServer::OnUvMessage(const CGetServerNumberMsg & msg, TcpClientCtx * p
     this->SendUvMessage(CGetServerNumberMsg{ slaveNum }, CGetServerNumberMsg::MSG_ID, pClient);
     return 0;
 }
-
-//int CMasterServer::OnUvMessage(const CEditSchedulerMsg & msg, TcpClientCtx * pClient)
-//{
-//    HRRN = msg.hrrn;
-//    this->SendUvMessage(msg, msg.MSG_ID, pClient);
-//    return 0;
-//}
-
-//int CMasterServer::OnUvMessage(const CCheckMasterIdleMsg & msg, TcpClientCtx * pClient)
-//{
-//    CCheckMasterIdleMsg res{
-//        this->m_setIdleSlaveServer.size() == this->m_vectorLoginSlave.size() };
-//    this->SendUvMessage(res, res.MSG_ID, pClient);
-//    return 0;
-//}
 
 int CMasterServer::OnUvMessage(const CClientLoginMsg & msg, TcpClientCtx * pClient)
 {
@@ -263,13 +269,15 @@ int CMasterServer::OnUvMessage(const CLoginMsg & msg, TcpClientCtx * pClient)
 }
 
 int main(int argc, char** argv) {
-    if (argc != 3) {
-        printf("usage:programName slaveNum coflowNum.e.g.:master.exe 1 1\n");
+    if (argc < 3) {
+        printf("usage:programName slaveNum coflowNum [mode(option)].if mode=0,coflow start together,else coflow start one by one\n.e.g.:master.exe 1 1\n");
         return -1;
     }
     slaveNum = stoi(argv[1]);
     coflowNum = stoi(argv[2]);
-    zsummer::log4z::ILog4zManager::getRef().start();
+    if(argc==4)
+        mode = stoi(argv[3]);
+    //zsummer::log4z::ILog4zManager::getRef().start();
     CMasterServer server;
     if (!server.Start()) {
         fprintf(stdout, "Start Server error:%s\n", server.GetLastErrMsg());

@@ -16,10 +16,10 @@ public:
     Coflow generateCoflow();
     uv_async_t m_asyncHandle;
     CUVMutex m_mutex;
-    void pushEndedFlowId(int flowId,uint64_t endTime);
-    vector<pair<int,uint64_t>>m_vectorEndedFlowId;
+    void pushEndedFlowId(uint32_t flowId,uint64_t endTime);
+    vector<pair<uint32_t,uint64_t>>m_vectorEndedFlowId;
     Coflow m_coflow;
-    unordered_map<int, CClientSlave>hashmap;
+    unordered_map<uint32_t, CClientSlave>hashmap;
     uint32_t finifshedFlowNum=0;
 protected:
     BEGIN_UV_BIND
